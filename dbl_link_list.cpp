@@ -80,33 +80,49 @@ protected:
 
 class TEST_DBL_LINK_LIST : public dbl_link_list {
   public:
-  void confirm_empty()
+  bool confirm_empty()
   {
-    REQUIRE((!head && !tail));
+    return !head && !tail;
   }
-  void check_list_integrity(int expected_nodes)
+  
+  bool check_list_integrity(int expected_nodes)
   {
     std::shared_lock l(guard);
-    REQUIRE(head);
-    REQUIRE(tail);
+    if (!head || !tail) { return false; }
     int nodes{0};
     for (node *n = head; n; n = n->next) {
       nodes++;
-      REQUIRE(n->app_data);
-      REQUIRE((n == head || n->previous));
-      REQUIRE((n == tail || n->next));
+      if (!n->app_data) { return false; }
+      if (n != head && !n->previous) { return false; }
+      if (n != tail && !n->next) { return false; }
+      if (!n->next) {
+        if (tail != n) { return false; }
+      }
     }
-    REQUIRE(nodes == expected_nodes);
+    if (nodes != expected_nodes) { return false; }
+    return true;
   }
-  void confirm_found(void *app_data, int expected_found) {
+
+  int confirm_found(void *app_data) {
     std::shared_lock l(guard);
-    REQUIRE(head);
-    REQUIRE(tail);
+    if (!head) { return -1; }
+    if (!tail) { return -1; }
     int found{0};
     for (node *n = head; n; n = n->next) {
       if (app_data == n->app_data) { found++; }
     }
-    REQUIRE(found == expected_found);
+    return found;
+  }
+
+  node *get_node(int position) {
+    std::shared_lock l(guard);
+    if (!head) { return nullptr; }
+    if (!tail) { return nullptr; }
+    node *n = head;
+    for (int i = 0; i < position && n; i++) {
+      n = n->next;
+    }
+    return n;
   }
 };
 
@@ -119,38 +135,113 @@ TEST_CASE("Nodes can be added and removed", "[basic_test]")
   TEST_DBL_LINK_LIST list;
 
   SECTION("Adding some nodes") {
-    list.confirm_empty();
+    REQUIRE(list.confirm_empty());
     REQUIRE(list.add(&app_data1) == err_code::SUCCESS);
-    list.check_list_integrity(1);
-    list.confirm_found(&app_data1, 1);
+    REQUIRE(list.check_list_integrity(1));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
 
     REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
-    list.check_list_integrity(2);
-    list.confirm_found(&app_data1, 1);
-    list.confirm_found(&app_data2, 1);
+    REQUIRE(list.check_list_integrity(2));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
 
     REQUIRE(list.add(&app_data3) == err_code::SUCCESS);
-    list.check_list_integrity(3);
-    list.confirm_found(&app_data1, 1);
-    list.confirm_found(&app_data2, 1);
-    list.confirm_found(&app_data3, 1);
+    REQUIRE(list.check_list_integrity(3));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 1);
 
     REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
-    list.check_list_integrity(4);
-    list.confirm_found(&app_data1, 1);
-    list.confirm_found(&app_data2, 2);
-    list.confirm_found(&app_data3, 1);
+    REQUIRE(list.check_list_integrity(4));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 2);
+    REQUIRE(list.confirm_found(&app_data3) == 1);
   }
 
-  SECTION("Removing nodes") (
-    list.confirm_empty();
+  SECTION("Removing nodes") {
+    REQUIRE(list.confirm_empty());
+    REQUIRE(!list.get_node(0));
+
+    // 1 -> 2 -> 3 -> 2
     REQUIRE(list.add(&app_data1) == err_code::SUCCESS);
     REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
     REQUIRE(list.add(&app_data3) == err_code::SUCCESS);
     REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
-    list.check_list_integrity(4);
+    REQUIRE(list.check_list_integrity(4));
 
-    node *n = list.get_node(2);
-    REQUIRE(list.remove())
-  )
+    // 1 -> 3 -> 2
+    node *n = list.get_node(1);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(3));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 1);
+
+    // 1 -> 2
+    n = list.get_node(1);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(2));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 0);
+
+    // out of bounds remove
+    n = list.get_node(3);
+    REQUIRE(!n);
+
+    // 2
+    n = list.get_node(0);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(1));
+    REQUIRE(list.confirm_found(&app_data1) == 0);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 0);
+
+    // 2 -> 1
+    REQUIRE(list.add(&app_data1) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(2));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 0);
+
+    // 2
+    n = list.get_node(1);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(1));
+    REQUIRE(list.confirm_found(&app_data1) == 0);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 0);
+
+    // empty list
+    n = list.get_node(0);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.confirm_empty());
+    REQUIRE(list.confirm_found(&app_data2) == -1);
+
+    // try to remove on empty list
+    REQUIRE(list.remove(n) == err_code::ERROR);
+
+    // mix stuff and make sure list is ok
+    REQUIRE(list.add(&app_data1) == err_code::SUCCESS);
+    REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
+    n = list.get_node(1);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
+    REQUIRE(list.add(&app_data3) == err_code::SUCCESS);
+    REQUIRE(list.add(&app_data2) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(4));
+    n = list.get_node(3);
+    REQUIRE(n);
+    REQUIRE(list.remove(n) == err_code::SUCCESS);
+    REQUIRE(list.check_list_integrity(3));
+    REQUIRE(list.confirm_found(&app_data1) == 1);
+    REQUIRE(list.confirm_found(&app_data2) == 1);
+    REQUIRE(list.confirm_found(&app_data3) == 1);
+ }
 }
