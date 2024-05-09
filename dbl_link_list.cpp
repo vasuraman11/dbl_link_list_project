@@ -84,6 +84,7 @@ class TEST_DBL_LINK_LIST : public dbl_link_list {
   public:
   bool confirm_empty()
   {
+    std::shared_lock l(guard);
     return !head && !tail;
   }
   
